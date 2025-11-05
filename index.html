@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="he">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>🎨 Disney Animal Shooter: Infinite Stages</title>
+<style>
+  :root { --bg-speed: 30s; }
+  body { margin: 0; overflow: hidden; font-family: "Comic Sans MS", cursive; direction: rtl; }
+  canvas { display: block; }
+
+  /* === רקעים מתחלפים כל 3 שלבים === */
+  body.theme-disney {
+    background: linear-gradient(120deg, #b3ecff, #ffffff 60%, #ffe6ff);
+    animation: pan var(--bg-speed) linear infinite; background-size: 300% 300%;
+  }
+  body.theme-rain { background: linear-gradient(#5fa8d3, #cfe8ff); }
+  body.theme-rain::before {
+    content: ""; position: fixed; inset: 0;
+    background-image:
+      linear-gradient(120deg, rgba(255,255,255,0.35) 2px, transparent 2px),
+      linear-gradient(120deg, rgba(255,255,255,0.25) 1px, transparent 1px);
+    background-size: 4px 12px, 3px 10px; background-position: 0 0, 0 0;
+    animation: rain 0.6s linear infinite; pointer-events: none;
+  }
+  body.theme-stars { background: radial-gradient(circle at 20% 30%, #151a2b, #0d1120 60%, #070a14); }
+  body.theme-stars::before {
+    content: ""; position: fixed; inset: 0;
+    background:
+      radial-gradient(2px 2px at 20% 30%, #fff8, transparent 40%),
+      radial-gradient(1.5px 1.5px at 70% 50%, #fff6, transparent 40%),
+      radial-gradient(1.5px 1.5px at 40% 80%, #fff6, transparent 40%),
+      radial-gradient(2px 2px at 85% 20%, #fff8, transparent 40%);
+    animation: twinkle 4s ease-in-out infinite alternate; pointer-events: none;
+  }
+  body.theme-sea { background: linear-gradient(#a0e7ff, #4ec6ff 40%, #0284c7); }
+  body.theme-sunset { background: linear-gradient(#ffcc88, #ff9966 50%, #ff5e62); }
+
+  @keyframes pan { 0% {background-position: 0 0;} 100% {background-position: 300% 0;} }
+  @keyframes rain { to { background-position: -50px 100px, -30px 80px; } }
+  @keyframes twinkle { from {opacity:.7} to {opacity:1} }
+
+  /* HUD */
+  #hud { position: absolute; top: 12px; left: 12px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; z-index: 5; }
+  .pill { font-size: 18px; color: #333; background: rgba(255,255,255,0.9);
+    padding: 6px 12px; border-radius: 12px; box-shadow: 0 2px 6px rgba(0,0,0,.1); user-select: none; }
+  #collection { display: flex; gap: 6px; align-items: center; padding: 4px 8px; border-radius: 10px; }
+  #collection .badge { font-size: 20px; filter: drop-shadow(0 1px 0 rgba(0,0,0,.2)); cursor: pointer; border-radius: 8px; padding: 2px 4px; border: 2px solid transparent; }
+  #collection .badge.active { border-color: #22c55e; background: #eaffea; }
+
+  #levelBanner { position: absolute; top: 50%; left: 50%; translate: -50% -50%;
+    padding: 18px 28px; background: rgba(255,255,0,0.96); color: #222; font-weight: bold; font-size: 28px;
+    border-radius: 16px; box-shadow: 0 8px 30px rgba(0,0,0,.25); display: none; z-index: 15; }
+
+  /* מסך בחירה: תיבת הפתעה */
+  #pickModal { position: absolute; inset: 0; display: none; z-index: 20; background: rgba(0,0,0,0.35); align-items: center; justify-content: center; }
+  #pickCard { background: #fff; padding: 22px; border-radius: 16px; min-width: 280px; box-shadow: 0 10px 30px rgba(0,0,0,.25); text-align: center; }
+  #mysteryBox { font-size: 64px; cursor: pointer; user-select: none; transition: transform .15s ease; }
+  #mysteryBox:hover { transform: scale(1.08) rotate(-4deg); }
+  #pickedEmoji { font-size: 56px; margin-top: 10px; display: none; }
+  #confirmPick { display: none; margin-top: 12px; padding: 10px 16px; border: none; border-radius: 10px; background: #22c55e; color: #fff; font-weight: 600; cursor: pointer; }
+
+  /* מסך סיום */
+  #gameOver { position: absolute; inset: 0; background: radial-gradient(circle at center, #ffe6ff, #ffb3ff);
+    display: none; flex-direction: column; justify-content: center; align-items: center; text-align: center; z-index: 25; }
+  #gameOver h1 { font-size: 3em; color: #fff; text-shadow: 2px 2px #333; margin: 0 0 10px 0; }
+  #gameOver p { color: #fff; font-size: 1.3em; margin: 0 0 20px 0; }
+  .restart-btn { padding: 15px 30px; border: none; border-radius: 12px; background: #ff66b2; color: white; font-size: 1.2em; cursor: pointer; transition: .3s; }
+  .restart-btn:hover { background: #ff3385; transform: scale(1.05); }
+</style>
+</head>
+<body class="theme-disney">
+<canvas id="gameCanvas"></canvas>
+
+<!-- HUD -->
+<div id="hud">
+  <div id="score" class="pill">ניקוד: 0</div>
+  <div id="stage" class="pill">שלב: 1 (יעד: 50)</div>
+  <div id="stageProg" class="pill">התקדמות: 0 / 50</div>
+  <div id="collection" class="pill" title="לחץ/י על דמות כדי להפוך אותה לדמות הראשית">
+    אוסף: <span id="colBadges" style="margin-inline-start:6px;"></span>
+  </div>
+</div>
+
+<div id="levelBanner">⬆️ עלינו לשלב 2!</div>
+
+<!-- מסך בחירה: תיבת הפתעה -->
+<div id="pickModal">
+  <div id="pickCard">
+    <h2>🥇 כל הכבוד! פתח/י תיבת הפתעה</h2>
+    <div id="mysteryBox" aria-label="תיבת הפתעה" title="לחץ/י לפתיחה">🎁</div>
+    <div id="pickedEmoji"></div>
+    <button id="confirmPick">המשך</button>
+    <p style="margin-top:10px; font-size:14px; color:#555;">הדמות תתווסף לאוסף למעלה וניתן להפוך אותה ליורה הראשית בלחיצה.</p>
+  </div>
+</div>
+
+<!-- מסך סיום -->
+<div id="gameOver">
+  <h1>🎮 המשחק נגמר!</h1>
+  <p id="finalScore"></p>
+  <button class="restart-btn">שחק שוב 🔁</button>
+</div>
+
+<audio id="music" loop>
+  <source src="https://cdn.pixabay.com/download/audio/2022/03/15/audio_243c80b27d.mp3?filename=happy-kids-112193.mp3" type="audio/mpeg">
+</audio>
+
+<script>
+/* ---------- Canvas & Globals ---------- */
+const canvas = document.getElementById("gameCanvas");
+const ctx = canvas.getContext("2d");
+const music = document.getElementById("music");
+canvas.width = innerWidth; canvas.height = innerHeight;
+addEventListener("resize", ()=>{ canvas.width=innerWidth; canvas.height=innerHeight; });
+
+/* ---------- UI Elements ---------- */
+const scoreEl = document.getElementById("score");
+const stageEl = document.getElementById("stage");
+const stageProgEl = document.getElementById("stageProg");
+const banner = document.getElementById("levelBanner");
+const gameOverEl = document.getElementById("gameOver");
+const finalScoreEl = document.getElementById("finalScore");
+const pickModal = document.getElementById("pickModal");
+const mysteryBox = document.getElementById("mysteryBox");
+const pickedEmojiEl = document.getElementById("pickedEmoji");
+const confirmPickBtn = document.getElementById("confirmPick");
+const colBadgesEl = document.getElementById("colBadges");
+
+/* ---------- Game State ---------- */
+let player, bullets=[], enemyBullets=[], enemies=[], particles=[];
+let boss=null, bossHealth=0, bossActive=false; // ← ללא lastBossShotAt/BOSS_COOLDOWN כאן
+let score=0, gameRunning=false;
+let enemySpeed=2, enemyInterval=null;
+let stage = 1;
+let stageKills = 0;
+let targetKills = 50;
+let keys = new Set();
+let lastShotAt = 0;
+let collected = [];
+let playerEmoji = "🐭";
+let pickedPending = null;
+
+/* שליטה עם חיצים/רווח + M לסיום שלב */
+const MOVE_SPEED = 7;
+const FIRE_COOLDOWN_MS = 200;
+
+addEventListener("keydown", (e)=>{
+  if (["ArrowLeft","ArrowRight","Space","KeyM"].includes(e.code)) e.preventDefault();
+  keys.add(e.code);
+  if (e.code === "Space") tryPlayMusic();
+  if (e.code === "KeyM" && gameRunning) { // סיום שלב לצורכי בדיקות
+    stageKills = targetKills;
+  }
+});
+addEventListener("keyup", (e)=>{ keys.delete(e.code); });
+
+/* עכבר */
+addEventListener("mousemove", (e)=> { if (player && gameRunning) player.x = e.clientX; });
+addEventListener("click", ()=>{
+  tryPlayMusic();
+  if (!gameRunning || !player) return; // לא לירות לפני התחלת המשחק
+  attemptShoot();
+});
+
+/* ---------- Assets ---------- */
+const animalEmojis = [
+  "🐶","🐱","🐭","🐹","🐰","🦊","🐻","🐼","🐨","🐯","🦁","🐮",
+  "🐷","🐸","🐵","🐔","🐧","🐦","🐤","🦆","🦅","🦉","🦇","🐺",
+  "🐴","🦄","🐝","🐛","🦋","🐞","🐢","🐍","🦎","🐙","🦑","🐠","🐬","🦒","🦓","🦔","🦘"
+];
+const bossEmoji = "🐉";
+
+/* ---------- Classes ---------- */
+class Character {
+  constructor(x, y, emoji, size=40) { this.x=x; this.y=y; this.emoji=emoji; this.size=size; }
+  draw() { ctx.font = this.size+"px Arial"; ctx.textAlign="center"; ctx.fillText(this.emoji, this.x, this.y); }
+}
+class Bullet {
+  constructor(x, y, color, dx=0, dy=-9) { this.x=x; this.y=y; this.r=6; this.color=color; this.dx=dx; this.dy=dy; }
+  draw(){ ctx.beginPath(); ctx.arc(this.x,this.y,this.r,0,Math.PI*2); ctx.fillStyle=this.color; ctx.fill(); }
+  update(){ this.x+=this.dx; this.y+=this.dy; this.draw(); }
+}
+class EnemyBullet {
+  constructor(x, y, dx, dy) { this.x=x; this.y=y; this.r=8; this.dx=dx; this.dy=dy; }
+  draw(){
+    ctx.beginPath(); ctx.arc(this.x,this.y,this.r,0,Math.PI*2);
+    ctx.fillStyle="#ff2d2d"; ctx.fill();
+    ctx.lineWidth=2; ctx.strokeStyle="#111"; ctx.stroke();
+  }
+  update(){ this.x+=this.dx; this.y+=this.dy; this.draw(); }
+}
+class Particle {
+  constructor(x,y,color){ this.x=x; this.y=y; this.r=Math.random()*3+1; this.color=color;
+    this.vx=(Math.random()-0.5)*5; this.vy=(Math.random()-0.5)*5; this.a=1; }
+  draw(){ ctx.save(); ctx.globalAlpha=this.a; ctx.beginPath(); ctx.arc(this.x,this.y,this.r,0,Math.PI*2);
+    ctx.fillStyle=this.color; ctx.fill(); ctx.restore(); }
+  update(){ this.x+=this.vx; this.y+=this.vy; this.a-=0.02; }
+}
+
+/* ---------- Helpers ---------- */
+function rand(arr){ return arr[Math.floor(Math.random()*arr.length)]; }
+function explode(x,y,color){ for(let i=0;i<15;i++) particles.push(new Particle(x,y,color||"#000")); }
+function tryPlayMusic(){ music.play().catch(()=>{}); }
+function clamp(v,min,max){ return Math.max(min,Math.min(max,v)); }
+function currentTargetForStage(s){ return 40 + s*10; } // 1:50, 2:60, ...
+
+/* רקעים מתחלפים */
+const THEMES = ["theme-disney","theme-rain","theme-stars","theme-sea","theme-sunset"];
+function applyThemeForStage(s){
+  const idx = Math.floor((s-1)/3) % THEMES.length;
+  const body = document.body;
+  THEMES.forEach(t => body.classList.remove(t));
+  body.classList.add(THEMES[idx]);
+}
+
+function updateHUD(){
+  scoreEl.textContent = "ניקוד: " + score;
+  stageEl.textContent = `שלב: ${stage} (יעד: ${targetKills})`;
+  stageProgEl.textContent = `התקדמות: ${stageKills} / ${targetKills}`;
+}
+function showBanner(text){
+  banner.textContent = text;
+  banner.style.display = "block";
+  setTimeout(()=> banner.style.display="none", 1800);
+}
+
+/* ---------- Spawning ---------- */
+/* מהשלב 7 ממשיכים ספאונים רגילים + בוס אחד גדול */
+function spawnEnemy(){
+  if (!gameRunning) return;
+  if (bossActive && Math.random() < 0.15) return; // מעט מרווח כשבוס פעיל
+  const x = Math.random()*canvas.width;
+  enemies.push(new Character(x, -50, rand(animalEmojis), 40));
+}
+function spawnBoss(){
+  if (bossActive) return;
+  bossActive = true;
+  const base = 18;
+  const extra = Math.max(0, stage-7)*6;
+  bossHealth = base + extra;
+  boss = new Character(canvas.width/2, 120, bossEmoji, 120);
+  boss.direction = 1;
+  boss.vy = 0.8 + 0.1*Math.min(10, stage-7); // ירידה איטית מטה
+}
+
+/* בוס יורה על השחקן (משלב 7) — יריות עבות ואיטיות יותר */
+let lastBossShotAt = 0;
+const BOSS_COOLDOWN_MIN = 700, BOSS_COOLDOWN_MAX = 1100;
+function bossShoot(){
+  if (!bossActive || !boss || stage < 7) return;
+  const now = performance.now();
+  if (now - lastBossShotAt < (BOSS_COOLDOWN_MIN + Math.random()*(BOSS_COOLDOWN_MAX-BOSS_COOLDOWN_MIN))) return;
+  lastBossShotAt = now;
+
+  const shots = 1 + Math.min(2, Math.floor((stage-7)/3)); // 1-3 כדורים במניפה
+  for (let i=0;i<shots;i++){
+    const targetX = player.x + (i - (shots-1)/2) * 40;
+    const targetY = player.y;
+    const dx = targetX - boss.x;
+    const dy = targetY - boss.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const speed = 4 + Math.min(2, Math.floor((stage-7)/4)); // איטי יותר כדי שייראה היטב
+    enemyBullets.push(new EnemyBullet(boss.x, boss.y+30, (dx/len)*speed, (dy/len)*speed));
+  }
+}
+
+/* ---------- Shooting (שלנו) ---------- */
+function attemptShoot(){
+  const now = performance.now();
+  if (now - lastShotAt < FIRE_COOLDOWN_MS) return;
+  lastShotAt = now;
+
+  const colors = ["red","blue","green","yellow","purple","orange"];
+  const c = rand(colors);
+
+  if (stage >= 7){
+    bullets.push(new Bullet(player.x, player.y-30, c, 0, -9));
+    bullets.push(new Bullet(player.x, player.y-30, c, -2.5, -8.2));
+    bullets.push(new Bullet(player.x, player.y-30, c,  2.5, -8.2));
+  } else {
+    bullets.push(new Bullet(player.x, player.y-30, c, 0, -9));
+  }
+}
+
+/* ---------- Stage Flow ---------- */
+function openMysteryBox(){
+  const pool = animalEmojis.filter(e => !collected.includes(e));
+  pickedPending = (pool.length ? rand(pool) : rand(animalEmojis));
+  mysteryBox.style.display = "none";
+  pickedEmojiEl.textContent = pickedPending;
+  pickedEmojiEl.style.display = "block";
+  confirmPickBtn.style.display = "inline-block";
+}
+mysteryBox.addEventListener("click", openMysteryBox);
+confirmPickBtn.addEventListener("click", ()=>{
+  if (!pickedPending) return;
+  collected.push(pickedPending);
+  addBadgeToCollection(pickedPending, true);
+  pickedPending = null;
+  pickedEmojiEl.style.display = "none";
+  confirmPickBtn.style.display = "none";
+  mysteryBox.style.display = "block";
+  pickModal.style.display = "none";
+  stage++;
+  stageKills = 0;
+  targetKills = currentTargetForStage(stage);
+  applyThemeForStage(stage);
+  showBanner(`⬆️ עלינו לשלב ${stage}!`);
+  startStageLoop();
+});
+
+function completeStage(){
+  gameRunning = false;
+  if (enemyInterval) clearInterval(enemyInterval);
+  pickedPending = null;
+  pickedEmojiEl.style.display = "none";
+  confirmPickBtn.style.display = "none";
+  mysteryBox.style.display = "block";
+  pickModal.style.display = "flex";
+}
+
+function startStageLoop(){
+  gameRunning = true;
+  enemies = []; bullets = []; enemyBullets=[]; particles = [];
+  boss = null; bossActive = false; lastBossShotAt = 0; // איפוס טיימר ירי של הבוס
+  updateHUD();
+
+  // מהירות אויבים קטנים (גם אחרי שלב 7)
+  enemySpeed = 2 + 0.25*(stage-1);
+
+  // ספאון אויבים קטנים
+  if (enemyInterval) clearInterval(enemyInterval);
+  const spawnMs = Math.max(550, 1200 - (stage-1)*80);
+  enemyInterval = setInterval(spawnEnemy, spawnMs);
+
+  // משלב 7: בוס אחד על המסך
+  if (stage >= 7) spawnBoss();
+
+  tryPlayMusic();
+  animate();
+}
+
+/* ---------- Game Loop ---------- */
+function animate(){
+  if (!gameRunning) return;
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  // תנועה עם חיצים
+  if (keys.has("ArrowLeft"))  player.x -= MOVE_SPEED;
+  if (keys.has("ArrowRight")) player.x += MOVE_SPEED;
+  player.x = clamp(player.x, 30, canvas.width-30);
+
+  // ירי עם רווח
+  if (keys.has("Space")) attemptShoot();
+
+  // שחקן
+  player.emoji = playerEmoji; player.draw();
+
+  // קליעים שלנו
+  bullets = bullets.filter(b => b.y > -30 && b.x>-30 && b.x<canvas.width+30);
+  bullets.forEach(b=> b.update());
+
+  // אויבים רגילים
+  enemies.forEach((e, i)=>{
+    e.y += enemySpeed;
+    e.draw();
+
+    // פגיעה בשחקן
+    if (Math.hypot(player.x - e.x, player.y - e.y) < 40) return endGame();
+
+    // פגיעה באויב
+    for (let j=bullets.length-1;j>=0;j--){
+      const b = bullets[j];
+      const dist = Math.hypot(b.x - e.x, b.y - e.y);
+      if (dist < 30){
+        explode(e.x,e.y,b.color);
+        enemies.splice(i,1);
+        bullets.splice(j,1);
+        score++; stageKills++;
+        updateHUD();
+        break;
+      }
+    }
+  });
+
+  // בוס — תנועה אופקית + ירידה מטה איטית
+  if (bossActive && boss){
+    boss.x += boss.direction * 3;
+    boss.y += boss.vy; // ירידה מטה
+    if (boss.x > canvas.width-100 || boss.x < 100) boss.direction *= -1;
+    boss.draw();
+
+    // יריות בוס
+    bossShoot();
+
+    // פגיעה בבוס
+    for (let j=bullets.length-1;j>=0;j--){
+      const b = bullets[j];
+      const dist = Math.hypot(b.x - boss.x, b.y - boss.y);
+      if (dist < 80){
+        explode(boss.x,boss.y,b.color);
+        bullets.splice(j,1);
+        bossHealth--;
+        if (bossHealth <= 0){
+          explode(boss.x,boss.y,"gold");
+          score++; stageKills++; // חיסול בוס = 1 התקדמות
+          updateHUD();
+          bossActive = false;
+          boss = null;
+          // נשמור על בוס יחיד: נוליד חדש רק אם עוד לא השלמנו את היעד
+          if (stage >= 7 && stageKills < targetKills) spawnBoss();
+        }
+      }
+    }
+
+    // התנגשות עם השחקן
+    if (boss && Math.hypot(player.x - boss.x, player.y - boss.y) < 85) return endGame();
+  } else if (stage >= 7 && stageKills < targetKills) {
+    // ודא שיש בוס יחיד על המסך בשלב 7+
+    spawnBoss();
+  }
+
+  // קליעים של האויב (בוס)
+  enemyBullets = enemyBullets.filter(b => b.y < canvas.height+30 && b.x>-30 && b.x<canvas.width+30);
+  for (const eb of enemyBullets){
+    eb.update();
+    if (Math.hypot(player.x - eb.x, player.y - eb.y) < 24) return endGame();
+  }
+
+  // חלקיקים
+  for (let i=particles.length-1;i>=0;i--){
+    const p = particles[i]; p.update();
+    if (p.a <= 0) particles.splice(i,1); else p.draw();
+  }
+
+  // סיום שלב?
+  if (stageKills >= targetKills){
+    if (enemyInterval) { clearInterval(enemyInterval); enemyInterval = null; }
+    enemies.length = 0; boss = null; bossActive = false; enemyBullets.length = 0;
+    completeStage();
+    return;
+  }
+
+  requestAnimationFrame(animate);
+}
+
+/* ---------- Collection (בחירת דמות ראשית) ---------- */
+function addBadgeToCollection(emoji, makeActiveIfNone=false){
+  const badge = document.createElement("span");
+  badge.className = "badge";
+  badge.textContent = emoji;
+  badge.title = "לחץ/י כדי להפוך לדמות הראשית";
+  badge.addEventListener("click", ()=>{
+    playerEmoji = emoji;
+    updateActiveBadge();
+  });
+  colBadgesEl.appendChild(badge);
+
+  if (makeActiveIfNone || colBadgesEl.querySelectorAll(".badge.active").length === 0){
+    playerEmoji = emoji;
+    updateActiveBadge();
+  }
+}
+function updateActiveBadge(){
+  colBadgesEl.querySelectorAll(".badge").forEach(el=>{
+    el.classList.toggle("active", el.textContent === playerEmoji);
+  });
+}
+
+/* ---------- Game Lifecycle ---------- */
+function startGame(){
+  gameOverEl.style.display = "none";
+  player = new Character(canvas.width/2, canvas.height - 80, playerEmoji);
+  bullets=[]; enemyBullets=[]; enemies=[]; particles=[]; collected=[];
+  colBadgesEl.innerHTML = "";
+  addBadgeToCollection(playerEmoji, true);
+  score = 0; stage = 1; stageKills = 0; targetKills = currentTargetForStage(stage);
+  applyThemeForStage(stage);
+  updateHUD();
+  startStageLoop();
+}
+
+function endGame(){
+  gameRunning = false;
+  if (enemyInterval) clearInterval(enemyInterval);
+  music.pause();
+  finalScoreEl.textContent = `ניקוד סופי: ${score} | שלב שהושג: ${stage}`;
+  gameOverEl.style.display = "flex";
+}
+
+/* ---------- Init & Restart ---------- */
+addEventListener("DOMContentLoaded", startGame);
+document.querySelector(".restart-btn").addEventListener("click", startGame);
+</script>
+</body>
+</html>
