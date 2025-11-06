@@ -2,12 +2,13 @@
 <html lang="he">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
 <title>🎨 Disney Animal Shooter: Infinite Stages</title>
 <style>
   :root { --bg-speed: 30s; }
+  * { box-sizing: border-box; }
   body { margin: 0; overflow: hidden; font-family: "Comic Sans MS", cursive; direction: rtl; touch-action: none; }
-  canvas { display: block; }
+  canvas { display: block; touch-action: none; }
 
   /* === רקעים מתחלפים כל 3 שלבים === */
   body.theme-disney {
@@ -48,6 +49,9 @@
   #collection .badge { font-size: 20px; filter: drop-shadow(0 1px 0 rgba(0,0,0,.2)); cursor: pointer; border-radius: 8px; padding: 2px 4px; border: 2px solid transparent; }
   #collection .badge.active { border-color: #22c55e; background: #eaffea; }
 
+  #autoFireBtn { cursor: pointer; user-select: none; border: 2px solid transparent; }
+  #autoFireBtn.on { background: #eaffea; border-color: #22c55e; }
+
   #levelBanner { position: absolute; top: 50%; left: 50%; translate: -50% -50%;
     padding: 18px 28px; background: rgba(255,255,0,0.96); color: #222; font-weight: bold; font-size: 28px;
     border-radius: 16px; box-shadow: 0 8px 30px rgba(0,0,0,.25); display: none; z-index: 15; }
@@ -67,24 +71,6 @@
   #gameOver p { color: #fff; font-size: 1.3em; margin: 0 0 20px 0; }
   .restart-btn { padding: 15px 30px; border: none; border-radius: 12px; background: #ff66b2; color: white; font-size: 1.2em; cursor: pointer; transition: .3s; }
   .restart-btn:hover { background: #ff3385; transform: scale(1.05); }
-
-  /* כפתורי מגע למסך מגע */
-  #touchControls {
-    position: absolute; bottom: 16px; left: 0; right: 0;
-    display: none; justify-content: center; gap: 14px; z-index: 30;
-  }
-  .tbtn {
-    min-width: 68px; min-height: 68px; border-radius: 999px; border: none;
-    background: rgba(255,255,255,0.85); box-shadow: 0 4px 18px rgba(0,0,0,.25);
-    font-size: 28px; font-weight: 700; color: #111; touch-action: none;
-  }
-  .tbtn:active { transform: scale(0.98); }
-  #tFire { min-width: 92px; min-height: 92px; font-size: 26px; background: #ffecb3; }
-
-  /* הצג רק במכשירי מגע */
-  @media (pointer: coarse) {
-    #touchControls { display: flex; }
-  }
 </style>
 </head>
 <body class="theme-disney">
@@ -98,6 +84,7 @@
   <div id="collection" class="pill" title="לחץ/י על דמות כדי להפוך אותה לדמות הראשית">
     אוסף: <span id="colBadges" style="margin-inline-start:6px;"></span>
   </div>
+  <div id="autoFireBtn" class="pill" title="הפעל/כבה ירי אוטומטי">🔁 ירי אוטומטי: כבוי</div>
 </div>
 
 <div id="levelBanner">⬆️ עלינו לשלב 2!</div>
@@ -118,13 +105,6 @@
   <h1>🎮 המשחק נגמר!</h1>
   <p id="finalScore"></p>
   <button class="restart-btn">שחק שוב 🔁</button>
-</div>
-
-<!-- כפתורי מגע -->
-<div id="touchControls" aria-hidden="true">
-  <button id="tLeft" class="tbtn" aria-label="שמאלה">⬅️</button>
-  <button id="tFire" class="tbtn" aria-label="ירי">🔫</button>
-  <button id="tRight" class="tbtn" aria-label="ימינה">➡️</button>
 </div>
 
 <audio id="music" loop>
@@ -151,11 +131,7 @@ const mysteryBox = document.getElementById("mysteryBox");
 const pickedEmojiEl = document.getElementById("pickedEmoji");
 const confirmPickBtn = document.getElementById("confirmPick");
 const colBadgesEl = document.getElementById("colBadges");
-
-/* כפתורי מגע */
-const tLeft = document.getElementById("tLeft");
-const tRight = document.getElementById("tRight");
-const tFire = document.getElementById("tFire");
+const autoFireBtn = document.getElementById("autoFireBtn");
 
 /* ---------- Game State ---------- */
 let player, bullets=[], enemyBullets=[], enemies=[], particles=[];
@@ -170,6 +146,7 @@ let lastShotAt = 0;
 let collected = [];
 let playerEmoji = "🐭";
 let pickedPending = null;
+let autoFire = false;
 
 /* שליטה עם חיצים/רווח + M לסיום שלב */
 const MOVE_SPEED = 7;
@@ -191,39 +168,35 @@ addEventListener("click", ()=>{
   attemptShoot();
 });
 
-/* מגע: הזזה וירי בטפיקה */
+/* ---------- נגיעה במסך (מובייל): ירי + הזזה ---------- */
 canvas.addEventListener("touchstart", (e)=>{
   tryPlayMusic();
-  if (!player) return;
   const t = e.touches[0];
-  if (t) { player.x = t.clientX; if (gameRunning) attemptShoot(); }
+  if (player && t) player.x = t.clientX;
+  if (gameRunning) attemptShoot();
   e.preventDefault();
 }, {passive:false});
 
 canvas.addEventListener("touchmove", (e)=>{
-  if (!player) return;
   const t = e.touches[0];
-  if (t) player.x = t.clientX;
+  if (player && t) player.x = t.clientX;
   e.preventDefault();
 }, {passive:false});
 
-/* כפתורי מגע: החזקה/לחיצה */
-let touchLeft=false, touchRight=false, touchShoot=false;
+/* מניעת זום כפול בטאץ' כפול */
+let lastTouchEnd = 0;
+document.addEventListener('touchend', function (e) {
+  const now = Date.now();
+  if (now - lastTouchEnd <= 300) e.preventDefault();
+  lastTouchEnd = now;
+}, {passive:false});
 
-function bindHold(btn, on, off){
-  const start = (e)=>{ on(); e.preventDefault(); };
-  const end   = (e)=>{ off(); e.preventDefault(); };
-  btn.addEventListener("touchstart", start, {passive:false});
-  btn.addEventListener("touchend",   end,   {passive:false});
-  btn.addEventListener("touchcancel",end,   {passive:false});
-  // גם לעכבר, אם משחקים בדסקטופ
-  btn.addEventListener("mousedown", start);
-  btn.addEventListener("mouseup",   end);
-  btn.addEventListener("mouseleave",end);
-}
-bindHold(tLeft,  ()=>{ touchLeft=true;  }, ()=>{ touchLeft=false;  });
-bindHold(tRight, ()=>{ touchRight=true; }, ()=>{ touchRight=false; });
-bindHold(tFire,  ()=>{ touchShoot=true; }, ()=>{ touchShoot=false; });
+/* ---------- Auto Fire Toggle ---------- */
+autoFireBtn.addEventListener("click", ()=>{
+  autoFire = !autoFire;
+  autoFireBtn.textContent = `🔁 ירי אוטומטי: ${autoFire ? "דלוק" : "כבוי"}`;
+  autoFireBtn.classList.toggle("on", autoFire);
+});
 
 /* ---------- Assets ---------- */
 const animalEmojis = [
@@ -290,7 +263,7 @@ function showBanner(text){
 /* ---------- Spawning ---------- */
 function spawnEnemy(){
   if (!gameRunning) return;
-  if (bossActive && Math.random() < 0.15) return;
+  if (bossActive && Math.random() < 0.15) return; // קצת פחות ספאון בזמן בוס
   const x = Math.random()*canvas.width;
   enemies.push(new Character(x, -50, rand(animalEmojis), 40));
 }
@@ -302,10 +275,10 @@ function spawnBoss(){
   bossHealth = base + extra;
   boss = new Character(canvas.width/2, 120, bossEmoji, 120);
   boss.direction = 1;
-  boss.vy = 0.8 + 0.1*Math.min(10, stage-7);
+  boss.vy = 0.8 + 0.1*Math.min(10, stage-7); // ירידה מתונה מטה
 }
 
-/* בוס יורה על השחקן (משלב 7) */
+/* בוס יורה על השחקן (משלב 7) — יריות ברורות ואיטיות */
 let lastBossShotAt = 0;
 const BOSS_COOLDOWN_MIN = 700, BOSS_COOLDOWN_MAX = 1100;
 function bossShoot(){
@@ -314,7 +287,7 @@ function bossShoot(){
   if (now - lastBossShotAt < (BOSS_COOLDOWN_MIN + Math.random()*(BOSS_COOLDOWN_MAX-BOSS_COOLDOWN_MIN))) return;
   lastBossShotAt = now;
 
-  const shots = 1 + Math.min(2, Math.floor((stage-7)/3));
+  const shots = 1 + Math.min(2, Math.floor((stage-7)/3)); // 1–3 כדורים במניפה
   for (let i=0;i<shots;i++){
     const targetX = player.x + (i - (shots-1)/2) * 40;
     const targetY = player.y;
@@ -387,16 +360,42 @@ function startStageLoop(){
   boss = null; bossActive = false; lastBossShotAt = 0;
   updateHUD();
 
+  // מהירות אויבים קטנים
   enemySpeed = 2 + 0.25*(stage-1);
 
+  // ספאון אויבים קטנים
   if (enemyInterval) clearInterval(enemyInterval);
   const spawnMs = Math.max(550, 1200 - (stage-1)*80);
   enemyInterval = setInterval(spawnEnemy, spawnMs);
 
+  // משלב 7: בוס יחיד
   if (stage >= 7) spawnBoss();
 
   tryPlayMusic();
   animate();
+}
+
+/* ---------- Collection (בחירת דמות ראשית) ---------- */
+function addBadgeToCollection(emoji, makeActiveIfNone=false){
+  const badge = document.createElement("span");
+  badge.className = "badge";
+  badge.textContent = emoji;
+  badge.title = "לחץ/י כדי להפוך לדמות הראשית";
+  badge.addEventListener("click", ()=>{
+    playerEmoji = emoji;
+    updateActiveBadge();
+  });
+  colBadgesEl.appendChild(badge);
+
+  if (makeActiveIfNone || colBadgesEl.querySelectorAll(".badge.active").length === 0){
+    playerEmoji = emoji;
+    updateActiveBadge();
+  }
+}
+function updateActiveBadge(){
+  colBadgesEl.querySelectorAll(".badge").forEach(el=>{
+    el.classList.toggle("active", el.textContent === playerEmoji);
+  });
 }
 
 /* ---------- Game Loop ---------- */
@@ -404,17 +403,12 @@ function animate(){
   if (!gameRunning) return;
   ctx.clearRect(0,0,canvas.width,canvas.height);
 
-  /* שליטה במגע/כפתורים */
-  if (touchLeft)  player.x -= MOVE_SPEED;
-  if (touchRight) player.x += MOVE_SPEED;
-  if (touchShoot) attemptShoot();
-
-  /* שליטה עם חיצים (אם יש) */
+  // קלט מהמקלדת (דסקטופ)
   if (keys.has("ArrowLeft"))  player.x -= MOVE_SPEED;
   if (keys.has("ArrowRight")) player.x += MOVE_SPEED;
-  if (keys.has("Space")) attemptShoot();
+  if (keys.has("Space") || autoFire) attemptShoot();
 
-  player.x = Math.max(30, Math.min(canvas.width-30, player.x));
+  player.x = clamp(player.x, 30, canvas.width-30);
 
   // שחקן
   player.emoji = playerEmoji; player.draw();
@@ -444,7 +438,7 @@ function animate(){
     }
   });
 
-  // בוס — תנועה אופקית + ירידה מטה
+  // בוס — תנועה אופקית + ירידה מטה איטית
   if (bossActive && boss){
     boss.x += boss.direction * 3;
     boss.y += boss.vy;
@@ -473,6 +467,7 @@ function animate(){
 
     if (boss && Math.hypot(player.x - boss.x, player.y - boss.y) < 85) return endGame();
   } else if (stage >= 7 && stageKills < targetKills) {
+    // ודא שיש תמיד בוס יחיד בשלב 7+
     spawnBoss();
   }
 
@@ -500,29 +495,6 @@ function animate(){
   requestAnimationFrame(animate);
 }
 
-/* ---------- Collection (בחירת דמות ראשית) ---------- */
-function addBadgeToCollection(emoji, makeActiveIfNone=false){
-  const badge = document.createElement("span");
-  badge.className = "badge";
-  badge.textContent = emoji;
-  badge.title = "לחץ/י כדי להפוך לדמות הראשית";
-  badge.addEventListener("click", ()=>{
-    playerEmoji = emoji;
-    updateActiveBadge();
-  });
-  colBadgesEl.appendChild(badge);
-
-  if (makeActiveIfNone || colBadgesEl.querySelectorAll(".badge.active").length === 0){
-    playerEmoji = emoji;
-    updateActiveBadge();
-  }
-}
-function updateActiveBadge(){
-  colBadgesEl.querySelectorAll(".badge").forEach(el=>{
-    el.classList.toggle("active", el.textContent === playerEmoji);
-  });
-}
-
 /* ---------- Game Lifecycle ---------- */
 function startGame(){
   gameOverEl.style.display = "none";
@@ -530,6 +502,9 @@ function startGame(){
   bullets=[]; enemyBullets=[]; enemies=[]; particles=[]; collected=[];
   colBadgesEl.innerHTML = "";
   addBadgeToCollection(playerEmoji, true);
+  autoFire = false;
+  autoFireBtn.textContent = "🔁 ירי אוטומטי: כבוי";
+  autoFireBtn.classList.remove("on");
   score = 0; stage = 1; stageKills = 0; targetKills = currentTargetForStage(stage);
   applyThemeForStage(stage);
   updateHUD();
@@ -547,14 +522,6 @@ function endGame(){
 /* ---------- Init & Restart ---------- */
 addEventListener("DOMContentLoaded", startGame);
 document.querySelector(".restart-btn").addEventListener("click", startGame);
-
-/* מניעת זום כפול בטאץ' כפול */
-let lastTouchEnd = 0;
-document.addEventListener('touchend', function (e) {
-  const now = Date.now();
-  if (now - lastTouchEnd <= 300) e.preventDefault();
-  lastTouchEnd = now;
-}, {passive:false});
 </script>
 </body>
 </html>
